@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: corpact
+      POSTGRES_USER: corpact
+      POSTGRES_PASSWORD: changeme
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corpact"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  localstack:
+    image: localstack/localstack:3
+    environment:
+      SERVICES: sqs,s3
+      DEFAULT_REGION: us-east-1
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./infra/localstack-init.sh:/etc/localstack/init/ready.d/init.sh
+
+  api:
+    build:
+      context: .
+      target: production
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DB_HOST: db
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/corpact-events
+      S3_RAW_BUCKET: corpact-raw-events
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+
+  worker:
+    build:
+      context: .
+      target: production
+    command: python -m app.worker.main
+    env_file: .env
+    environment:
+      DB_HOST: db
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/corpact-events
+      S3_RAW_BUCKET: corpact-raw-events
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    volumes:
+      - ./frontend/src:/app/src
+
+volumes:
+  pg_data:

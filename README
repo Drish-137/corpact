@@ -1,0 +1,66 @@
+# corpact
+
+Corporate actions collector, storage and public web dashboard — running on AWS free tier with CI/CD via GitHub Actions and Kubernetes (k3s).
+
+## Architecture overview
+
+```
+Public APIs (SEC EDGAR, Yahoo Finance)
+        │
+   Lambda scraper (EventBridge daily)
+        │
+      SQS queue
+        │
+   Lambda processor → RDS PostgreSQL ← API pod (FastAPI)
+                                              │
+                                       Frontend pod (Next.js)
+                                              │
+                                         ALB → CloudFront → users
+```
+
+## Repository layout
+
+```
+corpact/
+├── app/                    # Python backend
+│   ├── api/                # FastAPI application
+│   ├── worker/             # SQS consumer / normalizer
+│   ├── core/               # Shared config, DB, logging
+│   └── models/             # SQLAlchemy models + Pydantic schemas
+├── frontend/               # Next.js dashboard
+├── k8s/                    # Kubernetes manifests
+├── infra/                  # Lambda functions + IaC notes
+├── tests/                  # pytest suites
+├── Dockerfile              # Multi-stage image (api + worker)
+├── docker-compose.yml      # Local dev environment
+└── .github/workflows/      # CI/CD pipeline
+```
+
+## Quick start (local)
+
+```bash
+cp .env.example .env          # fill in your values
+docker compose up --build
+# API:      http://localhost:8000/docs
+# Frontend: http://localhost:3000
+```
+
+## Environment variables
+
+See `.env.example` for all required variables.
+
+## Deploying
+
+Push to `main`. GitHub Actions handles build → test → ECR push → kubectl apply → smoke test.
+
+See `.github/workflows/deploy.yml` for the full pipeline.
+
+## Free tier limits to watch
+
+| Service | Free allowance | This project's usage |
+|---------|---------------|----------------------|
+| Lambda  | 1M req/month  | ~60 invocations/day  |
+| RDS t3.micro | 750 hrs/month | 1 instance |
+| ECR | 500 MB | ~220 MB image |
+| S3 | 5 GB | raw event archive |
+| CloudFront | 1 TB egress | dashboard traffic |

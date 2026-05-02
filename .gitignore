@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.coverage
+coverage.xml
+.pytest_cache/
+.ruff_cache/
+
+# Env
+.env
+*.env.local
+
+# Node
+node_modules/
+.next/
+out/
+frontend/.next/
+frontend/node_modules/
+
+# Docker
+*.tar
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# AWS / Terraform
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# OS
+.DS_Store
+Thumbs.db
