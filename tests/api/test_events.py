@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.api.main import app
 from app.core.config import get_settings
 from app.core.database import Base, get_db
 from app.models.corporate_action import CorporateAction
@@ -14,8 +15,6 @@ settings = get_settings()
 async def noop_lifespan(app):
     yield
 
-
-from app.api.main import app
 app.router.lifespan_context = noop_lifespan
 
 
