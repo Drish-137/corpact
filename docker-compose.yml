@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: corpact
       POSTGRES_USER: corpact
-      POSTGRES_PASSWORD: changeme
+      POSTGRES_PASSWORD: corpdb
     ports:
       - "5432:5432"
     volumes:
@@ -22,7 +22,7 @@ services:
     image: localstack/localstack:3
     environment:
       SERVICES: sqs,s3
-      DEFAULT_REGION: us-east-1
+      #DEFAULT_REGION: us-east-1
     ports:
       - "4566:4566"
     volumes:
@@ -48,6 +48,7 @@ services:
         condition: service_healthy
     volumes:
       - ./app:/app/app
+      - ./tests:/app/tests
 
   worker:
     build:

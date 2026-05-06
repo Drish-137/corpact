@@ -1,0 +1,155 @@
+name: Build, test, and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: corp-actions
+  EKS_CLUSTER: corpact-cluster
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+
+  # ── Job 1: Lint + unit tests ─────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: corpact_test
+          POSTGRES_USER: corpact
+          POSTGRES_PASSWORD: testpass
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Run tests
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: corpact_test
+          DB_USER: corpact
+          DB_PASSWORD: testpass
+          APP_ENV: test
+          SQS_QUEUE_URL: ""
+          S3_RAW_BUCKET: ""
+        run: pytest tests/ --cov=app --cov-report=xml -v
+
+      - uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+
+  # ── Job 2: Build and push Docker image ──────────────────────────
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.push.outputs.image_uri }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag and push
+        id: push
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          IMAGE_URI=$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker build \
+            --target production \
+            --cache-from $REGISTRY/$ECR_REPOSITORY:latest \
+            -t $IMAGE_URI \
+            -t $REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $IMAGE_URI
+          docker push $REGISTRY/$ECR_REPOSITORY:latest
+          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+  # ── Job 3: Deploy to EKS (main branch only) ─────────────────────
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name $EKS_CLUSTER \
+            --region $AWS_REGION
+
+      - name: Deploy new image
+        env:
+          IMAGE_URI: ${{ needs.build.outputs.image_uri }}
+        run: |
+          kubectl set image deployment/api api=$IMAGE_URI -n corpact
+          kubectl set image deployment/worker worker=$IMAGE_URI -n corpact
+          kubectl set image deployment/frontend frontend=$IMAGE_URI -n corpact
+
+      - name: Wait for rollouts
+        run: |
+          kubectl rollout status deployment/api -n corpact --timeout=120s
+          kubectl rollout status deployment/worker -n corpact --timeout=120s
+          kubectl rollout status deployment/frontend -n corpact --timeout=120s
+
+      - name: Smoke test
+        run: |
+          ALB_URL=$(kubectl get ingress corpact-ingress \
+            -n corpact \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+          for i in {1..10}; do
+            STATUS=$(curl -sk -o /dev/null -w "%{http_code}" https://$ALB_URL/health)
+            if [ "$STATUS" = "200" ]; then
+              echo "Smoke test passed"
+              exit 0
+            fi
+            echo "Attempt $i: got $STATUS, retrying..."
+            sleep 5
+          done
+
+          echo "Smoke test failed — rolling back"
+          kubectl rollout undo deployment/api -n corpact
+          kubectl rollout undo deployment/worker -n corpact
+          kubectl rollout undo deployment/frontend -n corpact
+          exit 1
