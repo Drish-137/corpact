@@ -49,6 +49,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./tests:/app/tests
+      - ./conftest.py:/app/conftest.py
+      - ./pyproject.toml:/app/pyproject.toml
 
   worker:
     build:
