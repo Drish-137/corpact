@@ -7,7 +7,6 @@ Covers the exact CSV shape produced by the NASDAQ RSS Lambda scraper:
 """
 import csv
 import io
-import json
 from datetime import date
 from unittest.mock import MagicMock, patch
 

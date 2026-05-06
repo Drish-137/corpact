@@ -1,7 +1,6 @@
 import csv
 import io
 from datetime import date
-from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
