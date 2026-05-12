@@ -15,7 +15,7 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     setup_logging()
     settings = get_settings()
-    if settings.app_env != "test":          # ← add this check
+    if settings.app_env != "test":          
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     logger.info("corpact API started", env=settings.app_env)
